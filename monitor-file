@@ -1,0 +1,207 @@
+#!/bin/probevue
+#
+# Usage : monitor_file_update.e \"filename\" \"options\"
+# Don't use full path names for the filename,
+# options are :
+#       w: monitor what is writing to the file
+#       o: monitor what'is changing ownership of the file
+#       p: monitor what is changing permissions of the file
+#       d: monitor what is deleting the file
+#       r: monitor what is renaming (mv) from or to the file
+#       z: monitor what opens the file
+#       all: monitor all events
+# Examples : monitor_file_update.e \"passwd\" \"wop\"      ==> monitor what is writing,change ownership or permissions on file "password"    
+#            monitor_file_update.e \"motd\"                ==> monitor all events on file "motd"
+#            monitor_file_update.e \"myfile\" \"d\"        ==> monitor what deletes file "myfile"
+#            monitor_file_update.e \"filesystems\" \"all\" ==> monitor for any delete, write, chown or chmod event that might occurs on filesystems file.
+
+
+  
+
+int rename( char *frompath, char *topath);
+int chmod(char *filename, int mode);
+int chown(char *filename, int user, int group);
+int unlink (char *filename);
+int open(char *filename, int m, int p);
+int write(int fd, char *s, int size);
+int close(int fd);
+int execve( char* , struct arg_t* args , char* );
+
+
+@@BEGIN
+{
+        opt=$2;
+        wflag=0;oflag=0;pflag=0;dflag=0;rflag=0;zflag=0;
+        if ( strstr(opt,"all")) {wflag=1;oflag=1;pflag=1;dflag=1;rflag=1;zflag=1;}
+                else 
+                {
+                if (strstr(opt,"w")) wflag=1;
+                if (strstr(opt,"o")) oflag=1;
+                if (strstr(opt,"p")) pflag=1;
+                if (strstr(opt,"d")) dflag=1;
+                if (strstr(opt,"r")) rflag=1;
+		if (strstr(opt,"z")) zflag=1;
+                }
+        printf ("\n ==> Monitoring file %s for ",$1);
+        if (wflag) printf("writes, ");
+        if (oflag) printf("owner change, ");
+        if (pflag) printf("permission change, ");
+        if (dflag) printf("deletes, ");
+        if (rflag) printf("renames, ");
+	if (zflag) printf("opens, ");
+        printf ("\n------------------------------------------------------------------------------\n");
+
+}
+
+@@syscallx:*:chmod:entry
+when ( pflag ==1 )
+{         __auto String filename[1024];
+        filename = get_userstring(__arg1, -1);
+        if (strstr(filename,$1) == $1) {
+                printf("On %A User with id %d\n",timestamp(),__uid);
+                printf("Program: %s, pid: %d changed permissions of file:%s to:%o)\nProc tree:\n",__pname, __pid,filename,__arg2);
+                ptree(-1);
+                t1 = get_stktrace (10);
+                printf ("Stack:\n%t", t1);
+		printf("=========================================================\n");
+		printf("Proccesses started since probevue started and still running \n");
+		print(process, 0, SORT_BY_VALUE|SORT_TYPE_DESCEND);
+		printf("=========================================================\n");
+                printf ("------------------------------------------------------------------------------\n");
+                }
+}
+
+@@syscallx:*:chown:entry
+when (oflag == 1)
+{         __auto String filename[1024];
+        filename = get_userstring(__arg1, -1);
+        if (strstr(filename,$1) == $1) {
+                printf("On %A User with id %d\n",timestamp(),__uid);
+                printf("Program: %s, pid: %d changed ownership of file:%s to uid:%d, gid:%d)\nProc tree:\n",__pname, __pid,filename,__arg2,__arg3);
+                ptree(-1);
+                t1 = get_stktrace (10);
+                printf ("Stack:\n%t", t1);
+		printf("=========================================================\n");
+		printf("Proccesses started since probevue started and still running \n");
+		print(process, 0, SORT_BY_VALUE|SORT_TYPE_DESCEND);
+		printf("=========================================================\n");
+                printf ("------------------------------------------------------------------------------\n");
+                }
+}
+
+@@syscallx:*:unlink:entry
+when (dflag == 1)
+{
+         __auto String filename[1024];
+        filename = get_userstring(__arg1, -1);
+        if (strstr(filename,$1) == $1) {
+                printf("On %A User with id %d\n",timestamp(),__uid);
+                printf("Program: %s, pid: %d deleted file:%s\nProc tree:\n",__pname, __pid,filename);
+                ptree(-1);
+                t1 = get_stktrace (10);
+                printf ("Stack:\n%t", t1);
+		printf("=========================================================\n");
+		printf("Proccesses started since probevue started and still running \n");
+		print(process, 0, SORT_BY_VALUE|SORT_TYPE_DESCEND);
+		printf("=========================================================\n");
+                printf ("------------------------------------------------------------------------------\n");
+                }
+}
+
+@@syscallx:*:rename:entry
+when (rflag == 1)
+{
+         __auto String frompath[1024];
+         __auto String topath[1024];
+        frompath = get_userstring(__arg1, -1);
+        topath = get_userstring(__arg2, -1);
+        if (strstr(frompath,$1) == $1 || strstr(topath,$1) == $1) {
+                printf("On %A User with id %d\n",timestamp(),__uid);
+                printf("Program: %s, pid: %d renamed file:%s to %s\nProc tree:\n",__pname, __pid,frompath,topath);
+                ptree(-1);
+                t1 = get_stktrace (10);
+                printf ("Stack:\n%t", t1);
+		printf("=========================================================\n");
+		printf("Proccesses started since probevue started and still running \n");
+		print(process, 0, SORT_BY_VALUE|SORT_TYPE_DESCEND);
+		printf("=========================================================\n");
+                printf ("------------------------------------------------------------------------------\n");
+                }
+}
+
+@@syscall:*:open:entry
+when (wflag ==1 )
+{
+         __auto String filename[1024];
+        filename = get_userstring(__arg1, -1);
+        if (strstr(filename,$1) == $1) {
+               thread:open = 1;
+               file[__tid]=filename;
+        }
+}
+
+@@syscall:*:open:entry
+when (zflag ==1 )
+{
+	__auto String filename[1024];
+	filename = get_userstring(__arg1, -1);
+	if (strstr(filename,$1) == $1) {
+		thread:open = 1;
+		file[__tid]=filename;
+        	printf("On %A User with id %d\n",timestamp(),__uid);
+		printf("Program: %s, pid %d opened %s\n\nProc tree:\n",__pname, __pid, file[__tid]);
+		ptree(-1);
+                t1 = get_stktrace (10);
+                printf ("Stack:\n%t", t1);
+		printf("=========================================================\n");
+		printf("Proccesses started since probevue started and still running \n");
+		print(process, 0, SORT_BY_VALUE|SORT_TYPE_DESCEND);
+		printf("=========================================================\n");
+                printf ("------------------------------------------------------------------------------\n");
+		}
+}
+
+@@syscall:*:open:exit
+when (wflag==1 && thread:open == 1)
+{
+        thread:fd = __rv;
+}
+
+@@syscall:*:write:entry
+when (wflag==1 && thread:open == 1)
+{
+        __auto String buffer[4096];
+        buffer = get_userstring(__arg2, -1);
+        if (thread:open == 1 && thread:fd==__arg1)
+                {
+                printf("On %A User with id %d\n",timestamp(),__uid);
+                printf("Program: %s,pid: %d wrote:\n%s\nTo file:%s\nProc tree:\n",__pname, __pid,buffer,file[__tid]);
+                ptree(-1);
+                t1 = get_stktrace (10);
+                printf ("Stack:\n%t", t1);
+		printf("=========================================================\n");
+		printf("Proccesses started since probevue started and still running \n");
+		print(process, 0, SORT_BY_VALUE|SORT_TYPE_DESCEND);
+		printf("=========================================================\n");
+                printf ("------------------------------------------------------------------------------\n");
+                }
+}
+    
+@@syscall:*:close:entry
+when (wflag==1 && thread:open == 1)
+{
+     if (thread:fd == __arg1)
+         thread:open=0;
+         delete(file,__tid);
+}
+
+@@syscall:*:execve:entry
+{
+command=get_userstring(__arg1, -1)+'\0';
+process[__pid]=command;
+}
+
+@@sysproc:exit:*
+{
+delete(process,__pid);
+}
