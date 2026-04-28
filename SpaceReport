@@ -1,0 +1,286 @@
+#!/usr/bin/ksh
+# SpaceReport
+# 2010-11-23: SpaceReport v1.2 Agrega al final tres columnas: nombre del VG, espacio total del VG, espacio libre del VG
+# Ramon Barrios Lascar
+
+export PRGNAME=$(basename "$0" .sh)
+export CFGFILE="/etc/${PRGNAME}.conf"
+export DATE=$(date +"%Y%m%d") TIME=$(date +"%H%M%S")
+export RPTFILE="/var/${PRGNAME}_${DATE}.txt"
+export VERBOSE=false MAIL=false MAILTO="\"\"" MAILSUBJ="SISA SpaceReport report for $DATE"
+export TMPDIR="/tmp/${PRGNAME}_$$.dir"
+export TMPEXCLUDELVS="${TMPDIR}/${PRGNAME}_ELV$$.tmp" TMPEXCLUDEFSS="${TMPDIR}/${PRGNAME}_EFS$$.tmp"
+export TMPLVS="${TMPDIR}/${PRGNAME}_LV$$.tmp" TMPFSS="${TMPDIR}/${PRGNAME}_FS$$.tmp"
+export ONELVINFO ONELVSIZE
+
+ShowSyntax ()
+{
+  printf "$PRGNAME crea un reporte de espacio en los servidores seleccionados en $CFGFILE\n"
+  printf "Sintaxis:\n"
+  printf -- "  $PRGNAME [ -K  | -V ] [ -v ] [ -o RPTFILE ] [ -m destino@example.com ]\n"
+  printf -- "  $PRGNAME -h\n"
+  printf "Opciones:\n"
+  printf -- "  -K           -- Crear nuevo archivo de configuracion\n"
+  printf -- "  -V           -- Volcar (mostrar) archivo de configuracion\n"
+  printf -- "  -v           -- Mostrar progreso del comando (verbose)\n"
+  printf -- "  -o RPTFILE   -- Especificar archivo reporte\n"
+  printf -- "  -m DESTINO   -- Especificar destinatario del correo de reporte\n"
+  printf -- "  -h           -- Mostrar ayuda de sintaxis\n"
+}
+
+TemporaryDirectory ()
+{
+  if [ ! -d "$TMPDIR" ]
+  then
+    $VERBOSE && printf "$PRGNAME: Directorio temporal $TMPDIR no existe. Creando\n" >&2
+    mkdir -p "$TMPDIR" 2>/dev/null
+    if [ ! -d "$TMPDIR" ]
+    then
+      printf "$PRGNAME: Problema creando el directorio temporal $TMPDIR.\n" >&2
+      exit 11
+    fi
+  fi
+}
+
+CleanTemporaries ()
+{
+  if [ -d "$TMPDIR" ] && [ ! -n "$DEBUG" ]
+  then
+    $VERBOSE && printf "$PRGNAME: Removiendo temporales ..." >&2
+    rm -Rf "$TMPDIR" 2>/dev/null
+    rm -f "$EXCLUDELVS" "$EXCLUDEFSS"
+    if [ -d "$TMPDIR" ]
+    then
+      printf "$PRGNAME: No se pudo remover el directorio temporal $TMPDIR!\n" >&2
+    else
+      printf " done\n" >&2
+    fi
+  fi
+}
+
+CreateDefaultCfg ()
+{
+  if [ -f "$CFGFILE" ]
+  then
+    printf "$PRGNAME: El archivo de configuración ya existe, realmente quiere reescribirlo? " >&2
+    read RESP
+    case "$RESP" in
+    (y|Y|s|S) > "$CFGFILE"
+      $VERBOSE && printf "$PRGNAME: Archivo de configuración \"$CFGFILE\" destruido\n" >&2
+      ;;
+    (*)
+      printf "$PRGNAME: El archivo de configuración NO fue destruido\n" >&2
+      exit 4
+      ;;
+    esac
+  fi
+  {
+  echo "SERVERS="$(hostname | cut -f1 -d.)
+  echo "ADMINUSER=root"
+  echo "EXCLUDEFS=/ /usr /var"
+  echo "EXCLUDELV=hd5 hd6"
+  } > "$CFGFILE"
+}
+
+ProcessMachines ()
+{
+  CreateTmpLvList
+  CreateTmpFsList
+  printf "$PRGNAME: Procesando servidores ...\n" >&2
+  for SERVER in $SERVERS
+  do
+    printf "  ${SERVER}\n" >&2
+    ProcessOneServer "$SERVER"
+  done
+  $VERBOSE && printf "$PRGNAME: Generando reporte ... " >&2
+  $VERBOSE && printf "%-12s  %-96s %-4s %-6s  %-6s  %-6s %-12s  %-5s %-5s\n" "ServerName" "LvName              LvType     Lvs     Pps     Pvs  LvStatus      FsName                         PpS" " FsS" "   FsU" "  FsF" " VolumeGroup" " VgS" "VgF" > ${RPTFILE}
+  $VERBOSE || > "${RPTFILE}"
+  cat ${TMPDIR}/${PRGNAME}_fs_*.txt >> "${RPTFILE}"
+  cat ${TMPDIR}/${PRGNAME}_ls_*.txt >> "${RPTFILE}"
+  $VERBOSE && printf "Hecho\n" >&2
+  printf "$PRGNAME: Reporte ${RPTFILE} generado.\n" >&2
+}
+
+CreateTmpLvList ()
+{
+  echo "$EXCLUDELV" | sed 's/ /\
+/g' | sort -u | egrep -v '^[[:blank:]]*$' > "$TMPEXCLUDELVS"
+  [ -n "$DEBUG" ] && (echo "Excluded LVs:"; cat "$TMPEXCLUDELVS" )
+}
+
+CreateTmpFsList ()
+{
+  echo "$EXCLUDEFS" | sed 's/ /\
+/g' | sort -u | egrep -v '^[[:blank:]]*$' > "$TMPEXCLUDEFSS"
+  [ -n "$DEBUG" ] && (echo "Excluded FSs:"; cat "$TMPEXCLUDEFSS" )
+}
+
+
+DumpCfgFile ()
+{
+  if [ -f "$CFGFILE" ]
+  then
+    printf "Archivo de configuración \"$CFGFILE\":\n" >&2
+    awk '{printf "  "; print }' $CFGFILE >&2
+  else
+    printf "$PRGNAME: El archivo de configuracion \"$CFGFILE\" no existe!\n" >&2
+    exit 3
+  fi
+}
+
+ProcessOneServer ()
+{
+  [ -n "$DEBUG" ] && set -x
+  ASERVER="$1"
+  # Get volumegroup list
+  $VERBOSE && printf -- "    Obteniengo grupos de volúmenes activos ..." >&2
+  export VGS=$(ssh "$ADMINUSER"@"$ASERVER" "lsvg -o")
+  VGS=$(echo "$VGS" | sed 's/ /\
+/g')
+  echo "$VGS" > "$TMPDIR/${PRGNAME}_avg_${ASERVER}.txt"
+  $VERBOSE && printf " hecho\n" >&2
+  # Init list files
+  > "$TMPLVS"
+  > "$TMPFSS"
+  # Get logical volumes and file systems for volume group
+  for AVG in $VGS
+  do
+    $VERBOSE && printf -- "    Obteniendo características de $AVG ..." >&2
+    export VGPPSIZE=$(ssh "$ADMINUSER"@"$ASERVER" lsvg -L "$AVG" | awk '/PP SIZE:/{print $6}')
+    export VGGBTOT=$(ssh "$ADMINUSER"@"$ASERVER" lsvg -L "$AVG" | awk -v OFMT='%.1f' '/TOTAL PPs/{print substr($7,2)/1024}')
+    export VGGBUSD=$(ssh "$ADMINUSER"@"$ASERVER" lsvg -L "$AVG" | awk -v OFMT='%.1f' '/USED PPs/{print substr($6,2)/1024}')
+    export VGGBFRE=$(ssh "$ADMINUSER"@"$ASERVER" lsvg -L "$AVG" | awk -v OFMT='%.1f' '/FREE PPs/{print substr($7,2)/1024}')
+    $VERBOSE && printf -- " hecho\n" >&2
+    $VERBOSE && printf -- "    Obteniendo volúmenes lógicos en $AVG ..." >&2
+    export ALLOTHLVS=$(ssh "$ADMINUSER"@"$ASERVER" lsvg -Ll "$AVG" | awk 'NR>2 && ($2!="jfslog" && $2!="jfs2log") && ($2!="jfs" && $2!="jfs2"){print $1}')
+    $VERBOSE && printf -- " hecho\n    Obteniendo sistemas de archivos en $AVG ..." >&2
+    export ALLJFS2FSS=$(ssh "$ADMINUSER"@"$ASERVER" lsvg -Ll "$AVG" | awk 'NR>2 && ($2=="jfs2" && $7!="N/A") {print $7}' | sed 's/^ //g;s/\
+/ /g')
+    export ALLJFS1FSS=$(ssh "$ADMINUSER"@"$ASERVER" lsvg -Ll "$AVG" | awk 'NR>2 && ($2=="jfs" && $7!="N/A") {print $7}' | sed 's/^ //g;s/\
+/ /g')
+    $VERBOSE && printf -- " hecho\n" >&2
+#    printf "$ALLJFS1LVS\n$ALLJFS2LVS\n" | grep "." > "$TMPDIR/${PRGNAME}_l_${AVG}.txt"
+    [ -n "$DEBUG" ] && printf "$ALLOTHLVS" >&2
+    # Create Logical Volume Table
+    > "${TMPDIR}/${PRGNAME}_ls_${AVG}_${ASERVER}.txt"
+    for ONELV in $ALLOTHLVS
+    do
+      if ! grep -q "^$ONELV$" "$TMPEXCLUDELVS"
+      then
+        ONELVINFO=$(ssh "$ADMINUSER"@"$ASERVER" lsvg -Ll "$AVG" | awk 'NR>2 && $1=="'$ONELV'"{print}')
+        ONELVSIZE=$(echo "$ONELVINFO" | awk -v PPS="$VGPPSIZE" -v OFMT='%.1f' '{print $3*PPS/1024}')
+        # Create a report register
+        # System Vgname Lvname Type Lps Pps Pvs LvState MountPoint PpSize Size Used Free
+        # System OneLvInfo VgPPsize Size Used Free
+        ONELVINFO=$(printf "%-12s  %-96s %-4s %-6s %-6s %-6s %-12s %-6s %-6s" "$ASERVER" "$ONELVINFO" "$VGPPSIZE" "$ONELVSIZE" "$ONELVSIZE" 0 "$AVG" "$VGGBTOT" "$VGGBFRE")
+        [ -n "$DEBUG" ] && printf "$ONELVINFO\n" >&2
+        [ -n "$DEBUG" ] && read
+        printf "$ONELVINFO\n"
+      fi
+    done > "${TMPDIR}/${PRGNAME}_ls_${AVG}_${ASERVER}.txt"
+    [ -n "$DEBUG" ] && cat "${TMPDIR}/${PRGNAME}_ls_${AVG}_${ASERVER}.txt"
+    # Create File System Table
+    > "${TMPDIR}/${PRGNAME}_fs_${AVG}_${ASERVER}.txt"
+    for ONEFS in $ALLJFS1FSS $ALLJFS2FSS
+    do
+      if ! grep -q "^$ONEFS$" "$TMPEXCLUDEFSS"
+      then
+        ONELVINFO=$(ssh "$ADMINUSER"@"$ASERVER" lsvg -Ll "$AVG" | awk 'NR>2 && $7=="'$ONEFS'"{print}')
+        # ONEFSSIZE=$(echo "$ONEFSINFO" | awk -v PPS="$VGPPSIZE" -v OFMT='%.1g' '{print $3*PPS/1024}')
+        ONEFSSPACEINFO=$(ssh "$ADMINUSER"@"$ASERVER" "df -Ig $ONEFS")
+        ONEFSSIZE=$(echo "$ONEFSSPACEINFO" | awk 'NR==2 {print $2}')
+        ONEFSUSED=$(echo "$ONEFSSPACEINFO" | awk 'NR==2 {print $3}')
+        ONEFSFREE=$(echo "$ONEFSSPACEINFO" | awk 'NR==2 {print $4}')
+        # Create a report register
+        # System Vgname Lvname Type Lps Pps Pvs LvState MountPoint PpSize Size Used Free
+        # System OneLvInfo VgPPsize Size Used Free
+        ONEFSINFO=$(printf "%-12s  %-96s %-4s %-6s %-6s %-6s %-12s %-6s %-6s" "$ASERVER" "$ONELVINFO" "$VGPPSIZE" "$ONEFSSIZE" "$ONEFSUSED" "$ONEFSFREE" "$AVG" "$VGGBTOT" "$VGGBFRE")
+        [ -n "$DEBUG" ] && printf "$ONEFSINFO\n" >&2
+        [ -n "$DEBUG" ] && read
+        printf "$ONEFSINFO\n"
+      fi
+    done > "${TMPDIR}/${PRGNAME}_fs_${AVG}_${ASERVER}.txt"
+    [ -n "$DEBUG" ] && cat "${TMPDIR}/${PRGNAME}_fs_${AVG}_${ASERVER}.txt"
+    printf "$ALLOTHLVS\n" | grep "." > "${TMPDIR}/${PRGNAME}_l_${AVG}_${ASERVER}.txt"
+    printf "$ALLJFS1FSS\n$ALLJFS2FSS\n" | grep "." > "$TMPDIR/${PRGNAME}_f_${AVG}_${ASERVER}.txt"
+  done
+  # Generate Report
+}
+
+SendMail ()
+{
+  $VERBOSE && printf "$PRGNAME: Generando y enviando correo a $MAILTO ... " >&2
+  mail -s "$MAILSUBJ" "$MAILTO" <<ENDMAIL
+  
+  SISA SpaceReport for ${DATE}
+  ----------------------------------------------------------
+  $(<${RPTFILE})
+  ----------------------------------------------------------
+
+ENDMAIL
+  $VERBOSE && printf "done\n" >&2
+}
+
+if [ -n "$1" ]
+then
+  while getopts :hKVvo:m: OPT "$@"
+  do
+    case "$OPT" in
+    (h|H|\?) ShowSyntax >&2
+      exit 0
+      ;;
+    (v) VERBOSE=true
+      ;;
+    (K) CreateDefaultCfg
+      exit 0
+      ;;
+    (V) DumpCfgFile
+      exit 0
+      ;;
+    (o) if [ -n "$OPTARG" ]
+      then
+        RPTFILE="$OPTARG"
+      else
+        printf "$PRGNAME: Bad syntax!\n" >&2
+        ShowSyntax >&2
+        exit 2
+      fi
+      ;;
+    (m) if [ -n "$OPTARG" ]
+      then
+        MAILTO="$OPTARG"
+        MAIL=true
+      else
+        printf "$PRGNAME: Bad syntax!\n" >&2
+        ShowSyntax >&2
+        exit 2
+      fi
+      ;;
+    esac
+  done
+  shift $(expr $OPTIND - 1)
+fi
+
+TemporaryDirectory
+# LoadCfgFile
+
+if [ -f "$CFGFILE" ]
+then
+  $VERBOSE && printf "$PRGNAME: Cargando archivo de configuración $CFGFILE\n" >&2
+  export SERVERS=$(awk -F' *= *' '$1=="SERVERS" {print $2}' $CFGFILE)
+  $VERBOSE && printf -- "  Servidores a reportar: $SERVERS\n" >&2
+  export EXCLUDELV=$(awk -F' *= *' '$1=="EXCLUDELV" {print $2}' $CFGFILE)
+  $VERBOSE && printf -- "  Volúmenes a excluir: $EXCLUDELV\n" >&2
+  export EXCLUDEFS=$(awk -F' *= *' '$1=="EXCLUDEFS" {print $2}' $CFGFILE)
+  $VERBOSE && printf -- "  Sistemas de archivos a excluir: $EXCLUDEFS\n" >&2
+  export ADMINUSER=$(awk -F' *= *' '$1=="ADMINUSER" {print $2}' $CFGFILE)
+  $VERBOSE && printf -- "  Usuario de conexión: $ADMINUSER\n" >&2
+else
+  printf "$PRGNAME: El archivo de configuración \"$CFGFILE\" no existe. Puede crearlo\n" >&2
+  printf "$PRGNAME: usando \"$PRGNAME -K\" para hacer uno predeterminado\n" >&2
+  exit 3
+fi
+
+ProcessMachines
+[ ! -n "$NOCLEAN" ] && CleanTemporaries
+$MAIL && SendMail
