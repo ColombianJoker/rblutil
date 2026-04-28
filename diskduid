@@ -1,0 +1,21 @@
+#!/usr/bin/ksh
+# DiskDUID
+export PRGNAME="${0##*/}"
+export DISK DUID DKSZ USER=$(whoami)
+[ -n "$DEBUG" ] && $DEBUG && set -x
+
+if [ $(uname) != "AIX" ] ; then
+	printf "$PRGNAME only runs on AIX, exiting...\n" >&2
+	exit 1
+fi
+
+[ "$USER" != "root" ] && printf "$PRGNAME: disk size read needs root user permissions!\n" >&2
+printf "%-12s %32s %-3sGB\n" "Disk Device" "--------------------------------" "Size" >&2
+for DISK in $(lsdev -c disk -F name -S Available) ; do
+	DUID=$(lsattr -El $DISK -a unique_id 2>/dev/null | awk '{print substr($2,6,32)}')
+	[ "$USER" = "root" ] && DKSZ=$(expr $(bootinfo -s $DISK) / 1024)"GB" || DKSZ="N/A"
+	printf "%-12s %32s %-5s\n" "$DISK" "$DUID" "$DKSZ"
+done
+for DISK in $(lsdev -c disk -F name -S Defined) ; do
+	printf "%-12s %32s %-5s\n" "$DISK" "Defined_Disk" "0GB"
+done
