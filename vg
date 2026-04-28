@@ -1,0 +1,92 @@
+#!/usr/bin/ksh
+# vg activates and deactivates full AIX volume groups
+
+export PRGNAME=$(basename "$0")
+
+ShowSyntax ()
+{
+  printf "$PRGNAME activates and deactivates full AIX volume groups\n"
+  printf "Syntax:\n"
+  printf "\tmountvg VolumeGroup\n"
+  printf "\tumountvg VolumeGroup\n"
+  printf "\t$PRGNAME mount VolumeGroup\n"
+  printf "\t$PRGNAME umount VolumeGroup\n"
+  printf "\t$PRGNAME -h"
+}
+
+UnMountVg ()
+{
+  VG="$1"
+  if lsvg | grep -q "$VG"
+  then
+    for PS in $(lsvg -l $VG | awk '($2=="paging") && ($6~/^open/) {print $1}')
+    do
+      printf "$PRGNAME: deactivating $PS ..."
+      swapoff /dev/$PS
+      printf " done\n"
+    done
+    for FS in $(lsvg -l $VG | awk '(($2=="jfs") || ($2=="jfs2")) && ($6~/^open/) {print $7}')
+    do
+      printf "$PRGNAME: unmounting $FS ..."
+      umount "$FS"
+      printf " done\n"
+    done
+    printf "$PRGNAME: varying off $VG ..."
+    varyoffvg "$VG"
+    printf " done\n"
+  else
+    printf "$PRGNAME: $VG is not a known volume group!\n" >&2
+    exit 3
+  fi
+}
+
+MountVg ()
+{
+  VG="$1"
+  if lsvg | grep -q "$VG"
+  then
+    printf "$PRGNAME: varying on $VG ..."
+    varyonvg "$VG"
+    printf " done\n"
+    for PS in $(lsvg -l $VG | awk '($2=="paging") && ($6~/^close/) {print $1}')
+    do
+      printf "$PRGNAME: activating $PS ..."
+      swapon /dev/$PS
+      printf " done\n"
+    done
+    for FS in $(lsvg -l $VG | awk '(($2=="jfs") || ($2=="jfs2")) && ($6~/^close/) {print $7}')
+    do
+      printf "$PRGNAME: mounting $FS ..."
+      mount "$FS"
+      printf " done\n"
+    done
+  else
+    printf "$PRGNAME: $VG is not a known volume group!\n" >&2
+    exit 3
+  fi
+}
+
+if [ -n "$2" ]
+then
+  if [ "$1" = "mount" ]
+  then
+    MountVg "$2"
+  else
+    UnMountVg "$2"
+  fi
+else
+  if [ -z "$1" ] || [ "$1" = "-h" ]
+  then
+    ShowSyntax >&2
+    exit 0
+  fi
+  if [ -n "$1" ]
+  then
+    if [ "$PRGNAME" = "mountvg" ]
+    then
+      "$PRGNAME" mount "$1"
+    else
+      "$PRGNAME" umount "$1"
+    fi
+  fi
+fi
