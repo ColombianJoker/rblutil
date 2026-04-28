@@ -1,0 +1,28 @@
+#!/usr/bin/env ksh93
+
+export PRGNAME=$(basename "$0" .sh)
+
+if [ -n "$1" ] ; then
+  NAME=$(lsdev -l "$1" -t ibm_ech -F name)
+  if [ -n "$NAME" ] ; then
+    ADAPTERS=$(lsattr -El "$NAME" -a adapter_names -F value | tr ',' ' ')
+    if [ -n "$ADAPTERS" ] ; then
+      printf "%s = %s\n" "$NAME" $(lsattr -El "$NAME" -a adapter_names -F value)
+    fi
+  else
+    for NAME in $(lsdev -l 'ent*' -t ibm_ech -F name) ; do
+      if [ -n "$NAME" ] ; then
+        ADAPTERS=$(lsattr -El "$NAME" -a adapter_names -F value | tr ',' ' ')
+        if [ -n "$ADAPTERS" ] ; then
+          printf "%s = %s\n" "$NAME" $(lsattr -El "$NAME" -a adapter_names -F value)
+        fi
+      fi
+    done
+  fi
+else
+  {
+    printf "PRGNAME lists etherchannel adapters and their components\n"
+    printf "Syntax:\n"
+    printf "  $PRGNAME ADAPTER_NAME | ALL\n"
+  }
+fi
