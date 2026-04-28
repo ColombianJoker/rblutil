@@ -1,0 +1,70 @@
+#!/usr/bin/ksh
+# putlv reubicates an AIX LV in another place, sequentially putting
+# its LPs in disk
+
+export PRGNAME=$(basename "$0" .sh)
+
+ShowSyntax () {
+  printf "$PRGNAME reubicates an AIX LV sequentially, starting from a\n"
+  printf "  given position in some disk\n"
+  printf "Syntax:\n"
+  printf "  $PRGNAME [ -d DISK ] LOGICALVOLUME STARTINGPOSITION\n"
+  printf "  $PRGNAME -l LOGICALVOLUME\n"
+  printf "  $PRGNAME -h\n"
+  printf "Options:\n"
+  printf "  LOGICALVOLUME    -- The name of the desired logical volume\n"
+  printf "  STARTINGPOSITION -- The physical partition to start putting\n"
+  printf "                      the desired logical volume\n"
+  printf "  DISK             -- Physical volume to put logical volume into\n"
+  printf "  -l LOGICALVOLUME -- Shows actual disk and position of volume\n"
+  printf "\nRamon Barrios Lascar, 2008\n"
+}
+
+DepictVolume () {
+  DISKS=$(lslv -l "$1" | awk 'NR>2 {print $1}')
+  if [ -n "$DISKS" ] ; then
+    lslv -l "$1"
+    printf "\n"
+    # Calculate disk zone size
+    for DK in $DISKS ; do
+      export ZONESIZE=$(expr $(expr $(lslv -p "$DK" "$1" | tail -n +2 | wc -l) - 4) / 5)
+      let i=1
+      for ZN in $(lslv -l "$1" | awk '/'$DK'/ {gsub(":"," ",$4); print $4}') ; do        
+        [ "$ZN" != "000" ] && lslv -p "$DK" "$1" | awk 'NR>(('$i'-1)*'$ZONESIZE'+'$i-1') && NR<=('$i'*'$ZONESIZE'+'$i-1')'
+        let i=i+1
+      done
+    done
+  fi
+}
+
+if [ -n "$1" ] ; then
+  case "$1" in
+    (-h*|-\?|-H*) ShowSyntax ; exit 0 ;;
+    (-l*) DepictVolume "$OPTARG" ; exit 0 ;;
+  esac
+  if [ "$#" -eq 1 ] ; then
+    DepictVolume "$1"
+    exit 0
+  fi
+  
+  while getopts :d: OPT "$@" ; do
+    case "$OPT" in
+     (d) DISK="$OPTARG" ;;
+    esac
+  done
+  shift $(expr $OPTIND - 1)
+  # Put LV in another place
+  if [ -z "$DISK" ] ; then
+    DISKS=$(lslv -l "$1" | awk 'NR>2 {print $1}')
+    if [ $(echo $DISKS | wc -w) -eq 1 ] ; then
+      DISK="$DISKS"
+    else
+      printf "$PRGNAME: Logical volume $1 is not in only ONE disk!\n" >&2
+      printf "$PRGNAME: You must especify a disk!\n" >&2
+      exit 2
+    fi
+  fi
+  for LP in $(lslv -m $1 | awk 'NR>2 {print $1}' ) ; do
+    migratelp $1/$(expr $LP '*' 1) $DISK/$(expr $2 - 1 + $LP '*' 1)
+  done
+fi
