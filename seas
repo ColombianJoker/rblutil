@@ -1,0 +1,48 @@
+#!/usr/bin/env ksh93
+
+export PRGNAME=$(basename "$0" .sh)
+if [ -n "$1" ] ; then
+  NAME=$(lsdev -l "$1" -t sea -F name)
+  if [ -n "$NAME" ] ; then
+    VIRT=$(lsattr -l "$NAME" -a virt_adapters -F value)
+    PVAD=$(lsattr -l "$NAME" -a pvid_adapter -F value)
+    PVID=$(lsattr -l "$NAME" -a pvid -F value)
+    READ=$(lsattr -l "$NAME" -a real_adapter -F value)
+    ETCH=$(lsdev -l "$READ" -t ibm_ech -F name)
+    ROW="${VIRT} -> ${NAME} <- ${READ} (${REAL})"
+    if [ -n "$ETCH" ] ; then
+      REAL=$(lsattr -El "$ETCH" -a adapter_names -F value)
+      ROW=$(echo "$ROW" | sed "s/${PVAD}/${PVAD}*/")
+    fi
+    echo "$ROW"
+  else
+    {
+    printf "$PRGNAME lists SEAs\n"
+    printf "Syntax:\n"
+    printf "  $PRGNAME NAME | ALL\n"
+    } >&2
+  fi
+else
+  for NAME in $(lsdev -t sea -F name) ; do
+    if [ -n "$NAME" ] ; then
+      VIRT=$(lsattr -l "$NAME" -a virt_adapters -F value)
+      PVAD=$(lsattr -l "$NAME" -a pvid_adapter -F value)
+      PVID=$(lsattr -l "$NAME" -a pvid -F value)
+      READ=$(lsattr -l "$NAME" -a real_adapter -F value)
+      ETCH=$(lsdev -l "$READ" -t ibm_ech -F name)
+      ROW="${VIRT} -> ${NAME} <- ${READ} (${REAL})"
+      if [ -n "$ETCH" ] ; then
+        REAL=$(lsattr -El "$ETCH" -a adapter_names -F value)
+        ROW=$(echo "$ROW" | sed "s/${PVAD}/${PVAD}*/")
+      fi
+      echo "$ROW"
+    else
+      {
+      printf "$PRGNAME lists SEAs\n"
+      printf "Syntax:\n"
+      printf "  $PRGNAME NAME | ALL\n"
+      } >&2
+    fi
+  done
+fi
+    
