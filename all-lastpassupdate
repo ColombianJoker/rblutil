@@ -1,0 +1,22 @@
+#!/usr/bin/env ksh93
+
+export PRGNAME=$(basename "$0" .sh)
+export ALLPASS="/etc/security/passwd"
+export LASTPASSUPD=${LASTPASSUPD:-"/etc/lastpassupdate"}
+
+if [ $(id -un) == "root" ] ; then
+  if [ -x "$LASTPASSUPD" ] ; then
+    if [ -n "$REGISTRY" ] ; then
+      lsuser -R "$REGISTRY" -a lastupdate ALL | "$LASTPASSUPD"
+    else
+      lsuser -a lastupdate ALL | "$LASTPASSUPD"
+    fi
+  else
+    printf "$PRGNAME: This program needs 'lastpassupdate' command to run\n" >&2 
+    printf "$PRGNAME: Defaults to '$LASTPASSUPD'\n" >&2
+    exit 2
+  fi
+else
+  printf "$PRGNAME: This program needs root to run.\n" >&2
+  exit 3
+fi
