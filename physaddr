@@ -1,0 +1,80 @@
+#!/usr/bin/env ksh
+# pysaddr shows physical (MAC and/or WWN) of adapters on AIX
+# 2015/nov/25 added a sed command to change AABBCCDDEEFFGGHH to AA:BB:CC:DD:EE:FF:GG:HH
+#             added a tr to lowercase MAC and WWPN addresses
+# 2020/mar/20 changed expression in match fcs* ent*
+
+export PRGNAME=$(basename "$0" .sh)
+[ -n "$DEBUG" ] && $DEBUG && set -x
+[ -n "$DEBUG" ] || export DEBUG=false
+
+if [ $(uname) != "AIX" ] && [ $(uname) != "Linux" ]; then
+  printf "$PRGNAME only runs on AIX or Linux!\n" >&2
+  exit 3
+fi
+ 
+AIXadapter () {
+	printf "$H\t"
+	lscfg -vl "$H" 2>/dev/null| awk -F'[ .]*' '/Network Address/ {print $NF;done=1}END{if(done==0){print}}' | sed 's/../&:/g;y/[A-F]/[a-f]/;s/:$//'
+}
+ 
+LinuxEth () {
+	IF="$1"
+	MAC=$(ifconfig "$IF" | awk '$1=="ether"{print $2}')
+	[ -n "$MAC" ] && printf "%-8s\t%17s\n" "$IF" "$MAC"
+}
+
+LinuxHost () {
+	HOSTADAP="$1"
+	if [ -d "$LNXHOSTS" ] ; then
+		if [ -e "$LNXHOSTS/$HOSTADAP/device/fc_host/$HOSTADAP/port_name" ] ; then
+			ADDR=$(cat "$LNXHOSTS/$HOSTADAP/device/fc_host/$HOSTADAP/port_name" | sed -e 's/^0x//;s/.\{2\}/&:/g;s/.$//')
+			printf "%-8s\t%23s\n" "$HOSTADAP" "$ADDR"
+		fi
+	fi
+}
+
+if [ $(uname) == "AIX" ] ; then
+	if [ $# -gt 0 ] ; then
+	  # printf "$PRGNAME: filter on $@\n" >&2
+    $DEBUG && echo "  $PRGNAME: args $@" >&2
+	  for H in "$@" ; do
+      $DEBUG && echo "  $PRGNAME: arg $H" >&2
+	    case "$H" in
+	      (fcs[0-9]*) AIXadapter "$H";;
+	      (ent[0-9]*) AIXadapter "$H";;
+	      (\?|[hH]*|-h) printf "$PRGNAME: shows physical address (MAC and/or WWN) of adapters on AIX\n" >&2
+	        printf "Syntax:\n" >&2
+	        printf -- "  $PRGNAME [ ADAPTER ... ]\n" >&2
+	        exit 0
+	        ;;
+        (*) printf "$PRGNAME: bad argument '$H'!\n" >&2 ;;
+	    esac
+	  done
+	else
+	  for H in $( lsdev -l 'ent*' -S Available -F name ; lsdev -l 'fcs*' -S Available -F name) ; do
+	    AIXadapter "$H"
+	  done
+	fi
+elif [ $(uname) == "Linux" ] ; then
+	export LNXHOSTS="/sys/class/scsi_host"
+	if [ $# -gt 0 ] ; then
+		for ARG in "$@" ; do
+			[ $(expr "$ARG" : "eth[0-9]") -gt 0 ] && LinuxEth "$ARG"
+			[ $(expr "$ARG" : "host[0-9]") -gt 0 ] && LinuxHost "$ARG"
+		done
+	else
+		for IF in $(ifconfig -s | awk 'NR>1 && $1!~/^lo/{print $1}') ; do
+			if [ $(expr "$IF" : ".*:[0-9]") -gt 0 ] ; then
+				: Skip VLAN interface
+			else
+				LinuxEth "$IF"
+			fi
+		done
+		if [ -d "$LNXHOSTS" ] && cd "$LNXHOSTS"; then
+			for HOSTADAP in host* ; do
+				[ -e "$LNXHOSTS/$HOSTADAP/device/fc_host/$HOSTADAP/port_name" ] && LinuxHost $HOSTADAP
+			done
+		fi
+	fi
+fi
