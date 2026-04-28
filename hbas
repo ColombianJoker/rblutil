@@ -1,0 +1,22 @@
+#!/usr/bin/ksh
+
+if [ $(uname) != "AIX" ] ; then
+	printf "$PRGNAME only runs on AIX, exiting...\n" >&2
+	exit 1
+fi
+
+if [ -n "$1" ] ; then
+  for H in $@ ; do
+    case "$H" in
+      (fcs[0-9]*) printf "$H\t"
+				lscfg -vl "$H" | awk -F'[ .]*' '/Network Address/ {print $NF}'
+				;;
+    esac
+  done
+else
+  for H in $(lsdev -l 'fcs*' -F name) ; do
+    printf "$H\t"
+    lscfg -vl "$H" | awk -F'[ .]*' '/Network Address/ {print $NF}'
+  done
+fi
+
