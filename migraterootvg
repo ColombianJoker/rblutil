@@ -1,0 +1,122 @@
+#!/usr/bin/env ksh
+
+export PRGNAME=$(basename "$0" .sh) ROOTVG="rootvg" HD5="hd5"
+[ -n "$DEBUG" ] && $DEBUG && set -x
+
+if [ $(uname) != "AIX" ] ; then
+	printf "$PRGNAME only runs on AIX, exiting...\n" >&2
+	exit 1
+fi
+
+if [ "$(whoami)" != "root" ] ; then
+  printf "$PRGNAME only runs with root permissions, exiting...\n" >&2
+  exit 1
+fi
+
+GetTargetDisk () { [ -n "$DEBUG" ] && $DEBUG && set -x
+  MAXFREEDISK=$(lsvg -p "$ROOTVG" | tail -n +3 | sort -k 4nr | awk '{print $1; exit}')
+  if [ -n "$MAXFREEDISK" ] ; then
+    printf "$PRGNAME: disk with max free space is ${MAXFREEDISK}, targeting to it\n" >&2
+    echo ${MAXFREEDISK}
+  else
+    printf "$PRGNAME: Could not get max free space disk in ${ROOTVG}!\n" >&2
+    exit 4
+  fi
+}
+
+ValidateTargetDisk () { [ -n "$DEBUG" ] && $DEBUG && set -x
+  if lslv -l "$HD5" | tail -n +3 | grep -qFw "$1" ; then
+    printf "$PRGNAME: ${1} contains ${HD5}, not useable!\n" >&2
+    exit 5
+  fi
+}
+
+GetFirstUsedDisk () { [ -n "$DEBUG" ] && $DEBUG && set -x
+  lsvg -p "$ROOTVG" | awk '(NR>2) && $4<$3{print $1; exit}'
+}
+
+ValidateSourceDisk () { [ -n "$DEBUG" ] && $DEBUG && set -x
+  if lslv -l "$HD5" | tail -n +3 | grep -qFw "$1" ; then
+    # Useable
+    :
+  else
+    printf "$PRGNAME: $1 does not contains $HD5, exiting...\n" >&2
+    exit 6
+  fi
+}
+
+MakeMirror () { [ -n "$DEBUG" ] && $DEBUG && set -x
+  PPSIZE=$(lsvg -L "$ROOTVG" | awk '/PP SIZE:/{print $(NF-1);exit}') # in MB
+  for LV in $(lsvg -Ll "$ROOTVG" | awk 'NR>2{print $1}') ; do
+    lsvg -Ll "$ROOTVG" | awk -v V="$LV" -v P="$PPSIZE" 'NR>2 && $1==V{printf("  %s (%4.2f GB)",$1,($3*P)/1024)}' >&2
+    mklvcopy -k "$LV" 2 "$2" && printf "\n" >&2 || printf "\tERROR!\n" >&2
+  done
+  printf "Syncvg ${ROOTVG}">&2
+  syncvg -v rootvg && printf "\n" >&2 || printf "\tERROR!\n" >&2
+  bosboot -ad "/dev/${2}" -l "$HD5"
+  savebase
+  if bootlist -m normal -o "$1" blv="$HD5" "$2" blv="$HD5" ; then
+    printf "Boot list set to bootlist -m normal -o ${1} blv=${HD5} ${2} blv=${HD5}\n"
+  else
+    printf "\tERROR!\n" >&2
+    exit 7
+  fi
+}
+
+RemoveMirror () { [ -n "$DEBUG" ] && $DEBUG && set -x
+  for LV in $(lsvg -Ll "$ROOTVG" | awk 'NR>2{print $1}') ; do
+    printf "  $LV" >&2
+    rmlvcopy "$LV" 1 "$1" && printf "\n" >&2 || printf "\tERROR!\n" >&2
+  done
+  chpv -c "$1"
+  printf "Syncvg ${ROOTVG}">&2
+  syncvg -v rootvg && printf "\n" >&2 || printf "\tERROR!\n" >&2
+  bosboot -ad "/dev/${2}" -l "$HD5"
+  savebase
+  if bootlist -m normal -o "$2" blv="$HD5" 2>/dev/null >&2; then
+    printf "Boot list set to bootlist -m normal -o ${2} blv=${HD5}\n"
+  else
+    printf "\tERROR!\n" >&2
+    exit 8
+  fi
+}
+
+RemoveIfEmpty () { [ -n "$DEBUG" ] && $DEBUG && set -x
+  if [ "$1" == $(lsvg -p "$ROOTVG" | awk -v H="$1" 'NR>2&& $3==$4 && $1=H{print $1;exit}') ] ; then
+    printf "Removing ${1} from ${ROOTVG}" >&2
+    reducevg "$ROOTVG" "$1" && printf "\n" >&2 || printf "\tERROR!\n" >&2
+  fi
+}
+
+DoMigrate () { [ -n "$DEBUG" ] && $DEBUG && set -x
+  MakeMirror "$1" "$2"
+  RemoveMirror "$1" "$2"
+  RemoveIfEmpty "$1"
+}
+
+ListResult () {
+  printf "$PRGNAME:\n" >&2
+  lsvg -p "$ROOTVG"
+  echo
+  lsvg -l "$ROOTVG"
+  echo
+  bootlist -m normal -o
+}
+
+if [ -n "$1" ] ; then
+  # Target disk
+  if lsvg -p "$ROOTVG" | grep -Fqw "$1" ; then
+    TARGET="$1"
+  else
+    printf "$PRGNAME: '$1' not useable to migrate ${ROOTVG}!\n" >&2
+    exit 3
+  fi
+else
+  TARGET=$(GetTargetDisk)
+  ValidateTargetDisk "$TARGET"
+  SOURCE=$(GetFirstUsedDisk)
+  ValidateSourceDisk "$SOURCE"
+  DoMigrate "$SOURCE" "$TARGET"
+  ListResult
+fi
+printf "$PRGNAME: Done.\n"
