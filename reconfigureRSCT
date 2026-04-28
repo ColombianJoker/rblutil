@@ -1,0 +1,17 @@
+#!/usr/bin/ksh
+# Reconfigure RSCT host keys
+
+if [ $(uname) != "AIX" ] ; then
+	printf "$PRGNAME only runs on AIX, exiting...\n" >&2
+	exit 1
+fi
+
+if [ -n "$1" ] ; then
+  for HOST in $@ ;   do
+    echo "$HOST:"
+    ssh root@$HOST '[ $(uname) = AIX ] && ( /usr/sbin/rsct/bin/rmcctrl -z ; /usr/sbin/rsct/install/bin/recfgct ;   /usr/sbin/rsct/bin/rmcctrl -p )'
+  done
+else
+  echo $(hostname):
+  /usr/sbin/rsct/bin/rmcctrl -z ; /usr/sbin/rsct/install/bin/recfgct ;   /usr/sbin/rsct/bin/rmcctrl -p
+fi
