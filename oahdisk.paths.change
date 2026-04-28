@@ -1,0 +1,46 @@
+#!/usr/bin/env ksh93
+# Script to dynamically balance oahdisk devices across fscsi0-3
+
+echo "=== 0. Ensuring all devices and paths are Available ==="
+cfgmgr
+
+set -A parents fscsi0 fscsi1 fscsi2 fscsi3
+
+echo "=== Starting Dynamic Path Configuration for oahdisks ==="
+
+# Retrieve all oahdisk names dynamically
+for disk in $(lsdev -l 'oahdisk*' -F name); do
+    # Extract only the digits from the disk name (e.g., "oahdisk17" -> "17")
+    num=$(echo $disk | sed 's/[^0-9]//g')
+    
+    # Calculate primary parent using the original 0-1-2-3 rotation
+    # 10# forces base-10 to prevent octal errors on "08" and "09"
+    idx=$(( (10#$num - 1) % 4 ))
+    primary_p=${parents[$idx]}
+    
+    echo "--- Configuring $disk (Target Primary Adapter: $primary_p) ---"
+
+    # Set Priorities based on the unique path_id
+    lspath -l "$disk" -F "parent path_id" | while read p p_id; do
+        if [[ "$p" == "$primary_p" ]]; then
+            chpath -l "$disk" -i "$p_id" -a priority=1
+        else
+            chpath -l "$disk" -i "$p_id" -a priority=2
+        fi
+    done
+done
+
+echo "=== Configuration Complete ==="
+# Verification: Just check the first and last disks found in the system
+ALL_DISKS=$(lsdev -l 'oahdisk*' -F name)
+set -A DISK_ARRAY $ALL_DISKS
+FIRST=${DISK_ARRAY[0]}
+LAST=${DISK_ARRAY[$((${#DISK_ARRAY[@]} - 1))]}
+
+for d in $FIRST $LAST; do
+    echo "--- Priorities for $d ---"
+    lspath -l "$d" -F "parent path_id" | while read p p_id; do
+        prio=$(lspath -AEl "$d" -i "$p_id" | grep priority | awk '{print $2}')
+        echo "Adapter: $p | Path ID: $p_id | Priority: $prio"
+    done
+done
