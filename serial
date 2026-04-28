@@ -1,0 +1,41 @@
+#!/usr/bin/env ksh
+# Lists Power server machine serial number or model/type
+
+export PRGNAME=$(basename "$0" .sh)
+
+ShowMT () {
+  lsattr -El sys0 -a modelname -F value | awk -F, '{print $NF}'
+}
+
+ShowSN () {
+  lscfg -vpl sysplanar0 | awk -F. '$0~"Machine/Cabinet Serial"{print $NF;exit 0}'
+}
+
+ShowSyntax () {
+  printf "$PRGNAME shows physical machine model or serial number\n"
+  printf "Syntax:\n"
+  printf "  $PRGNAME [ -h | -s | -m ]\n"
+  printf -- "  -s  Shows serial number\n"
+  printf -- "  -m  Shows machine model\n"
+  printf -- "  -h  Shows this help\n"
+}
+
+if [ $(uname) != "AIX" ] ; then
+  printf "$PRGNAME: this script only runs on AIX!, exiting...\n" >&2
+  exit 1
+fi
+
+if [ -n "$1" ] ; then
+  case "$1" in
+    (-m|-t) ShowMT ; exit ;;
+    (-M|-T) printf "M/T " ; ShowMT ; exit ;;
+    (-s|-n) ShowSN ; exit ;;
+    (-S|-N) printf "S/N " ; ShowSN ; exit ;;
+    (-F) MACHINE=$(ShowMT) ; SERIAL=$(ShowSN) ; printf "M/T ${MACHINE} S/N ${SERIAL}\n" ; exit ;;
+    (-h) ShowSyntax ; exit ;;
+    (*) ShowSyntax >&2 ; exit 2 ;;
+  esac
+else
+  ShowSN
+  exit 0
+fi
