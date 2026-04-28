@@ -1,0 +1,9 @@
+#!/usr/bin/env ksh
+
+export PRGNAME=$(basename "$0")
+
+printf "VSCSI\tVIRTUAL_MAP\n" >&2
+echo "cvai" | kdb | awk '$2~/vscsi/{print}$1~/vscsi/{print $1 "\t" $NF}'
+
+printf "\n" >&2
+echo "vfcs" | kdb | awk '$1~/^NAME/||$1~/^fcs/'
