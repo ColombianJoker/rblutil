@@ -1,0 +1,18 @@
+#!/usr/bin/env ksh
+# timestamp2date converts from AIX /etc/security/lastlogin to US date
+# RamonBarriosLascar@GMail.com
+
+if [ -n "$1" ]
+then
+  for tm in "$@"
+  do
+    dt=$(perl -e "print scalar(localtime("$tm"));")
+    printf "$tm = $dt\n"
+  done
+else
+  printf "Timestamp? "
+  read tm
+  dt=$(perl -e "print scalar(localtime("$tm"));")
+  printf "$tm = $dt\n"
+fi
+
