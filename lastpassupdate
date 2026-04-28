@@ -1,0 +1,28 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use POSIX qw(strftime);
+
+# Retrieve formats from environment variables or use defaults
+my $datetime_format = $ENV{'DATETIME_FORMAT'} // '%Y-%m-%d %H:%M:%S';
+my $username_format = $ENV{'USERNAME_FORMAT'} // '%s ';
+
+# Replace escape sequences in the format string
+$username_format =~ s/\\t/\t/g;
+
+while (<STDIN>) {
+    chomp;
+    if (/^(\d+)/) {
+        # Case 1: First token is a number
+        my $timestamp = $1;
+        my $formatted_time = strftime($datetime_format, localtime($timestamp));
+        print "$formatted_time\n";
+    } elsif (/^(\S+)\s+lastupdate=(\d+)/) {
+        # Case 2: WORD lastupdate=NUMBER
+        my ($word, $timestamp) = ($1, $2);
+        my $formatted_time = strftime($datetime_format, localtime($timestamp));
+        printf $username_format, $word;
+        print "$formatted_time\n";
+    }
+}
