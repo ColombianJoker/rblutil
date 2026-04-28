@@ -13,7 +13,8 @@ if [ $(id -un) == "root" ] ; then
     fi
   else
     printf "$PRGNAME: This program needs 'lastpassupdate' command to run\n" >&2 
-    printf "$PRGNAME: Defaults to '$LASTPASSUPD'\n" >&2
+    printf "$PRGNAME: Defaults to \$LASTPASSUPD ($LASTPASSUPD)\n" >&2
+    printf "$PRGNAME: Uses variables DATETIME_FORMAT and USERNAME_FORMAT\n" >&2
     exit 2
   fi
 else
